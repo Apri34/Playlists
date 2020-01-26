@@ -7,7 +7,8 @@ import {
   TouchableOpacity,
   Button,
 } from 'react-native';
-import Song from '../models/song';
+import {Song} from '../database/song';
+import {Playlist} from '../database/playlist';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 
 // Defining interface to be able to use the navigation property
@@ -18,37 +19,60 @@ interface Props {
 
 // Defining interface to be able to use state
 interface State {
+  songs: Song[];
   selectedSongs: Song[];
+  realm: Realm | null;
 }
 
 export default class AddSongs extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = {
-      // The selected songs are a state, because the UI changes when a song is selected
-      selectedSongs: this.props.navigation.getParam('addedSongs'),
-    };
+    this.setState(
+      (this.state = {
+        realm: null,
+        songs: [],
+        selectedSongs: [],
+      }),
+    );
   }
 
-  // Songs are built in
-  songs = [
-    new Song(0, 'Avicii', 'Heaven'),
-    new Song(1, 'Shakira', 'Waka Waka'),
-    new Song(2, 'Post Malone', 'Circles'),
-    new Song(3, 'Katy Perry', 'Dark Horse'),
-    new Song(4, 'Ed Sheeran', 'Shape of You'),
-    new Song(5, 'Maroon 5', 'Sugar'),
-    new Song(6, 'Adele', 'Hello'),
-    new Song(7, 'OneRepublic', 'Counting Stars'),
-    new Song(8, 'Queen', 'Bohemian Rhapsody'),
-    new Song(9, 'Deep Purple', 'Smoke On The Water'),
-    new Song(10, 'Nirvana', 'Smells Like Teen Spirit'),
-    new Song(11, 'Steppenwolf', 'Born To Be Wild'),
-    new Song(12, 'Kina', 'Get You the Moon'),
-    new Song(13, 'Petit Biscuit', 'Sunset Lover'),
-    new Song(14, 'Avicii', 'Levels'),
-    new Song(15, 'Avicii', 'Wake Me Up'),
-  ];
+  // This function gets called before the navigationOptions are set,
+  // so here the funtion, that is called when the button in the header is
+  // pressed, can be passed to the params of navigation
+  // Also create realm and fetch selectedSongs
+  componentDidMount() {
+    Realm.open({schema: [Playlist.schema, Song.schema]}).then(realm => {
+      let playlist = realm.objectForPrimaryKey<Playlist>(
+        'Playlist',
+        this.props.navigation.getParam('playlistId'),
+      );
+      let selectedSongs = playlist ? playlist.songs : [];
+      this.setState(
+        (this.state = {
+          selectedSongs: selectedSongs,
+          songs: Array.from(realm.objects<Song>('Song')),
+          realm: realm,
+        }),
+      );
+    });
+
+    this.props.navigation.setParams({
+      onDonePressed: () => {
+        // Calling the function that is passed from the
+        // previous screen and returning to previous screen
+        this.props.navigation.getParam('onAddSongs')();
+        this.props.navigation.goBack();
+      },
+    });
+  }
+
+  // Close realm
+  componentWillUnmount() {
+    const realm: Realm | null = this.state.realm;
+    if (realm !== null && !realm.isClosed) {
+      realm.close();
+    }
+  }
 
   static navigationOptions = ({navigation}: Props) => {
     return {
@@ -64,20 +88,6 @@ export default class AddSongs extends Component<Props, State> {
     };
   };
 
-  // This function gets called before the navigationOptions are set,
-  // so here the funtion, that is called when the button in the header is
-  // pressed, can be passed to the params of navigation
-  componentDidMount() {
-    this.props.navigation.setParams({
-      onDonePressed: () => {
-        // Calling the function that is passed from the
-        // previous screen and returning to previous screen
-        this.props.navigation.getParam('onAddSongs')(this.state.selectedSongs);
-        this.props.navigation.goBack();
-      },
-    });
-  }
-
   // Separator for Flatlist
   flatListItemSeperator = () => {
     return <View style={styles.itemSeparator} />;
@@ -87,7 +97,7 @@ export default class AddSongs extends Component<Props, State> {
     return (
       <View>
         <FlatList
-          data={this.songs}
+          data={this.state.songs}
           // KeyExtractor: Playlists have an id of type 'number', but the key has to be of type 'string'
           keyExtractor={item => item.id.toString()}
           ItemSeparatorComponent={this.flatListItemSeperator}
@@ -105,22 +115,38 @@ export default class AddSongs extends Component<Props, State> {
                 ) {
                   // If the song is selected, deselect -> remove from selectedSongs
                   // And update UI
-                  this.setState(
-                    (this.state = {
-                      selectedSongs: this.state.selectedSongs.filter(
-                        addedSong => addedSong.id != song.id,
-                      ),
-                    }),
-                  );
+                  if (this.state.realm) {
+                    this.state.realm.write(() => {
+                      if (this.state.selectedSongs) {
+                        this.setState(
+                          (this.state = {
+                            songs: this.state.songs,
+                            realm: this.state.realm,
+                            selectedSongs: this.state.selectedSongs.filter(
+                              selectedSong => selectedSong != song,
+                            ),
+                          }),
+                        );
+                      }
+                    });
+                  }
                 }
-                //If the song is not selected, select -> add to selectedSongs
+                // If the song is not selected, select -> add to selectedSongs
                 // And update UI
                 else {
-                  var newSelectedSongs = this.state.selectedSongs;
+                  let newSelectedSongs = this.state.selectedSongs;
                   newSelectedSongs.push(song);
-                  this.setState(
-                    (this.state = {selectedSongs: newSelectedSongs}),
-                  );
+                  if (this.state.realm) {
+                    this.state.realm.write(() => {
+                      this.setState(
+                        (this.state = {
+                          songs: this.state.songs,
+                          realm: this.state.realm,
+                          selectedSongs: newSelectedSongs,
+                        }),
+                      );
+                    });
+                  }
                 }
               }}>
               <Text style={styles.text}>

@@ -1,14 +1,10 @@
 import React, {Component} from 'react';
 import {StyleSheet, View, Text, FlatList, Button} from 'react-native';
-import Song from '../models/song';
-import Playlist from '../models/playlist';
+import {Song} from '../database/song';
+import {Playlist} from '../database/playlist';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import {
-  NavigationStackProp,
-  NavigationStackOptions,
-} from 'react-navigation-stack';
 
-//This screen is started when the user presses a playlist
+// This screen is started when the user presses a playlist
 
 // Defining interface to be able to use the navigation property
 // The navigation property gets passed to every component in the Navigator automatically
@@ -18,24 +14,43 @@ interface Props {
 
 // Defining interface to be able to use state
 interface State {
-  playlist: Playlist;
+  playlist: Playlist | null;
+  realm: Realm | null;
 }
 
 export default class PlaylistDetails extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = {
-      // Setting playlist as a state because it can be updated by selecting songs
-      // Initial state is passed from previous screen
-      playlist: this.props.navigation.getParam('playlist'),
-    };
+    this.setState(
+      (this.state = {
+        realm: null,
+        playlist: null,
+      }),
+    );
   }
+
+  // Function gets called when playlists are selected or deselected
+  // in the next screen, so they get updated here too
+  reloadPlaylist = () => {
+    let playlist = this.state.realm
+      ? this.state.realm.objectForPrimaryKey<Playlist>(
+          'Playlist',
+          this.props.navigation.getParam('playlistId'),
+        )
+      : null;
+    this.setState(
+      (this.state = {
+        playlist: playlist ? playlist : null,
+        realm: this.state.realm,
+      }),
+    );
+  };
 
   // Setting the title in the header to the name of the playlist
   // Setting a Button in the header to navigate to the AddSongs screen
   static navigationOptions = ({navigation}: Props) => {
     return {
-      title: navigation.getParam('playlist').name,
+      title: navigation.getParam('title'),
       headerRight: () => (
         <Icon
           name="add"
@@ -51,30 +66,45 @@ export default class PlaylistDetails extends Component<Props, State> {
   // This function gets called before the navigationOptions are set,
   // so here the funtion, that is called when the button in the header is
   // pressed, can be passed to the params of navigation
+  // Also create realm and fetch playlist
   componentDidMount() {
+    Realm.open({schema: [Playlist.schema, Song.schema]}).then(realm => {
+      let playlist = realm.objectForPrimaryKey<Playlist>(
+        'Playlist',
+        this.props.navigation.getParam('playlistId'),
+      );
+      this.setState(
+        (this.state = {
+          realm: realm,
+          playlist: playlist ? playlist : null,
+        }),
+      );
+    });
+
     this.props.navigation.setParams({
       onAddPressed: () => {
-        // Navigate to AddSongs screen and passing currently added songs
-        // as a parameter
+        // Navigate to AddSongs screen and passing the playlistId as parameter
         // Also passing a callback function as a parameter that updates
-        // The playlist in this screen and in the Playlists screen
-        this.props.navigation.navigate('AddSongs', {
-          addedSongs: this.state.playlist.songs,
-          onAddSongs: (selectedSongs: Song[]) => {
-            var newPlaylist = this.state.playlist;
-            newPlaylist.songs = selectedSongs;
-            this.setState(
-              (this.state = {
-                playlist: newPlaylist,
-              }),
-            );
-            // Calling function that is passed from the Playlists screen to
-            // update the playlists there
-            this.props.navigation.getParam('onAddSongs')(selectedSongs);
-          },
-        });
+        // the playlist in this screen and in the Playlists screen
+        if (this.state.playlist)
+          this.props.navigation.navigate('AddSongs', {
+            playlistId: this.state.playlist.id,
+            onAddSongs: () => {
+              this.reloadPlaylist();
+              this.props.navigation.getParam('reloadPlaylist')();
+            },
+          });
       },
+      title: this.state.playlist ? this.state.playlist.songs : 'Playlist',
     });
+  }
+
+  // Close realm
+  componentWillUnmount() {
+    const realm: Realm | null = this.state.realm;
+    if (realm !== null && !realm.isClosed) {
+      realm.close();
+    }
   }
 
   // Separator for Flatlist
@@ -84,17 +114,21 @@ export default class PlaylistDetails extends Component<Props, State> {
 
   render() {
     const {navigation} = this.props;
+    const songs = this.state.playlist ? this.state.playlist.songs : [];
+    const color: string = this.state.playlist
+      ? this.state.playlist.color
+      : 'white';
 
     return (
       <View
         // Setting style inline, because the background depends on the playlist that is opened
         style={{
-          backgroundColor: navigation.getParam('playlist').color,
+          backgroundColor: color,
           flex: 1,
           paddingHorizontal: 8,
         }}>
         <FlatList
-          data={this.state.playlist.songs}
+          data={songs}
           // KeyExtractor: Playlists have an id of type 'number', but the key has to be of type 'string'
           keyExtractor={item => item.id.toString()}
           ItemSeparatorComponent={this.flatListItemSeperator}

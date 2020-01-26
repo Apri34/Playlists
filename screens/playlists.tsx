@@ -1,7 +1,8 @@
 import React, {Component} from 'react';
 import {StyleSheet, Text, FlatList, TouchableOpacity, View} from 'react-native';
-import Playlist from '../models/playlist';
-import Song from '../models/song';
+import {Playlist} from '../database/playlist';
+import {Song} from '../database/song';
+import {initData} from '../database/realm';
 
 // This is the initial screen
 
@@ -14,22 +15,55 @@ interface Props {
 // Defining interface to be able to use state
 interface State {
   playlists: Playlist[];
+  realm: Realm | null;
 }
 
 export default class Playlists extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
     this.state = {
-      // The playlists are built in and  are not meant to be changed, but it
-      // has to be a state because the songs inside the playlist can change
-      playlists: [
-        new Playlist(0, 'Favorite Songs', 'purple'),
-        new Playlist(1, 'Rock', 'green'),
-        new Playlist(2, 'Pop', 'blue'),
-        new Playlist(3, 'Electronic', 'yellow'),
-      ],
+      playlists: [],
+      realm: null,
     };
   }
+
+  // Create realm and fetch playlists and initialize data
+  // if app is started the first time
+  componentDidMount() {
+    Realm.open({schema: [Playlist.schema, Song.schema]}).then(realm => {
+      if (realm.objects<Playlist>('Playlist').length == 0) {
+        initData();
+      }
+      this.setState(
+        (this.state = {
+          playlists: Array.from(realm.objects<Playlist>('Playlist')),
+          realm: realm,
+        }),
+      );
+    });
+  }
+
+  // Close realm
+  componentWillUnmount() {
+    const realm: Realm | null = this.state.realm;
+    if (realm !== null && !realm.isClosed) {
+      realm.close();
+    }
+  }
+
+  // This method gets called when songs are added in the next screen
+  // Reloads the playlists
+  reloadPlaylists = () => {
+    this.setState(
+      (this.state = {
+        playlists: this.state.realm
+          ? Array.from(this.state.realm.objects<Playlist>('Playlist'))
+          : this.state.playlists,
+
+        realm: this.state.realm,
+      }),
+    );
+  };
 
   // Separator for Flatlist
   flatListItemSeperator = () => {
@@ -49,24 +83,15 @@ export default class Playlists extends Component<Props, State> {
           renderItem={({item: playlist}) => (
             <TouchableOpacity
               style={styles.item}
-              // When a playlist is presses, the app navigates to the PlaylistDetails screen
-              // Passing the playlist as parameter
+              // When a playlist is pressed, the app navigates to the PlaylistDetails screen
+              // Passing the playlistId as parameter
               // Passing a function as parameter: When the songs get selected,
               // they also have to be updated in this screen, therefore it is
-              // needed to pass the songs back to this screen with a callback funtion
+              // needed call a function here: reloadPlaylists()
               onPress={() =>
                 navigation.navigate('PlaylistDetails', {
-                  playlist: playlist,
-                  onAddSongs: (songs: Song[]) => {
-                    var newPlaylists = this.state.playlists;
-                    newPlaylists[playlist.id].songs = songs;
-                    // Setting the state to update UI
-                    this.setState(
-                      (this.state = {
-                        playlists: newPlaylists,
-                      }),
-                    );
-                  },
+                  playlistId: playlist.id,
+                  reloadPlaylists: this.reloadPlaylists(),
                 })
               }>
               <View style={styles.namePart}>
